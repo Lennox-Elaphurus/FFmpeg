@@ -2055,6 +2055,7 @@ SwsContext *sws_getContext(int srcW, int srcH, enum AVPixelFormat srcFormat,
     }
 
 //**********************
+/*
     SwsContext *swsCtx;
     swsCtx = c;
     if (changeColorspaceDetails)
@@ -2070,6 +2071,7 @@ SwsContext *sws_getContext(int srcW, int srcH, enum AVPixelFormat srcFormat,
         sws_setColorspaceDetails(swsCtx, coefs, srcRange, coefs, dstRange,
                                 brightness, contrast, saturation);
     }
+*/
 //**********************
 
     return c;
