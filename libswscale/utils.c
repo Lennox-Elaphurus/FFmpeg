@@ -2011,6 +2011,38 @@ SwsContext *sws_getContext(int srcW, int srcH, enum AVPixelFormat srcFormat,
 {
     SwsContext *c;
 
+//**********************
+    //AVCodecContext* pCodecCtx = c;
+    enum AVPixelFormat pixFormat;
+    int changeColorspaceDetails = 0;
+    switch (srcFormat)
+    {
+        case AV_PIX_FMT_YUVJ420P:
+        pixFormat = AV_PIX_FMT_YUV420P;
+        changeColorspaceDetails = 1;
+        break;
+        case AV_PIX_FMT_YUVJ422P:
+        pixFormat = AV_PIX_FMT_YUV422P;
+        changeColorspaceDetails = 1;
+        break;
+        case AV_PIX_FMT_YUVJ444P:
+        pixFormat = AV_PIX_FMT_YUV444P;
+        changeColorspaceDetails = 1;
+        break;
+        case AV_PIX_FMT_YUVJ440P:
+        pixFormat = AV_PIX_FMT_YUV440P;
+        changeColorspaceDetails = 1;
+        break;
+        default:
+        pixFormat = srcFormat;
+    }
+    srcFormat = pixFormat;
+    // initialize SWS context for software scaling
+    //SwsContext *swsCtx = sws_getContext(pCodecCtx->width, pCodecCtx->height, pixFormat, pCodecCtx->width, pCodecCtx->height, AV_PIX_FMT_RGB24, SWS_BILINEAR, NULL, NULL, NULL);
+    dstFormat=AV_PIX_FMT_RGB24;
+    flags = SWS_BILINEAR;
+//**********************
+
     c = sws_alloc_set_opts(srcW, srcH, srcFormat,
                            dstW, dstH, dstFormat,
                            flags, param);
@@ -2021,6 +2053,24 @@ SwsContext *sws_getContext(int srcW, int srcH, enum AVPixelFormat srcFormat,
         sws_freeContext(c);
         return NULL;
     }
+
+//**********************
+    SwsContext *swsCtx;
+    swsCtx = c;
+    if (changeColorspaceDetails)
+    {
+        // change the range of input data by first reading the current color space and then setting it's range as yuvj.
+        int dummy[4];
+        int srcRange, dstRange;
+        int brightness, contrast, saturation;
+        sws_getColorspaceDetails(swsCtx, (int**)&dummy, &srcRange, (int**)&dummy, &dstRange, &brightness, &contrast, &saturation);
+        const int* coefs;
+        coefs = sws_getCoefficients(SWS_CS_DEFAULT);
+        srcRange = 1; // this marks that values are according to yuvj
+        sws_setColorspaceDetails(swsCtx, coefs, srcRange, coefs, dstRange,
+                                brightness, contrast, saturation);
+    }
+//**********************
 
     return c;
 }
