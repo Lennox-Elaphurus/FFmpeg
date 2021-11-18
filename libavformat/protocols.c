@@ -27,6 +27,7 @@ extern const URLProtocol ff_async_protocol;
 extern const URLProtocol ff_bluray_protocol;
 extern const URLProtocol ff_cache_protocol;
 extern const URLProtocol ff_concat_protocol;
+extern const URLProtocol ff_concatf_protocol;
 extern const URLProtocol ff_crypto_protocol;
 extern const URLProtocol ff_data_protocol;
 extern const URLProtocol ff_ffrtmpcrypt_protocol;
@@ -75,27 +76,6 @@ extern const URLProtocol ff_libzmq_protocol;
 
 #include "libavformat/protocol_list.c"
 
-#if FF_API_CHILD_CLASS_NEXT
-const AVClass *ff_urlcontext_child_class_next(const AVClass *prev)
-{
-    int i;
-
-    /* find the protocol that corresponds to prev */
-    for (i = 0; prev && url_protocols[i]; i++) {
-        if (url_protocols[i]->priv_data_class == prev) {
-            i++;
-            break;
-        }
-    }
-
-    /* find next protocol with priv options */
-    for (; url_protocols[i]; i++)
-        if (url_protocols[i]->priv_data_class)
-            return url_protocols[i]->priv_data_class;
-    return NULL;
-}
-#endif
-
 const AVClass *ff_urlcontext_child_class_iterate(void **iter)
 {
     const AVClass *ret = NULL;
@@ -142,7 +122,7 @@ const URLProtocol **ffurl_get_protocols(const char *whitelist,
     const URLProtocol **ret;
     int i, ret_idx = 0;
 
-    ret = av_mallocz_array(FF_ARRAY_ELEMS(url_protocols), sizeof(*ret));
+    ret = av_calloc(FF_ARRAY_ELEMS(url_protocols), sizeof(*ret));
     if (!ret)
         return NULL;
 

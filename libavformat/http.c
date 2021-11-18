@@ -126,6 +126,7 @@ typedef struct HTTPContext {
     int is_multi_client;
     HandshakeState handshake_step;
     int is_connected_server;
+    int short_seek_size;
 } HTTPContext;
 
 #define OFFSET(x) offsetof(HTTPContext, x)
@@ -141,9 +142,6 @@ static const AVOption options[] = {
     { "content_type", "set a specific content type for the POST messages", OFFSET(content_type), AV_OPT_TYPE_STRING, { .str = NULL }, 0, 0, D | E },
     { "user_agent", "override User-Agent header", OFFSET(user_agent), AV_OPT_TYPE_STRING, { .str = DEFAULT_USER_AGENT }, 0, 0, D },
     { "referer", "override referer header", OFFSET(referer), AV_OPT_TYPE_STRING, { .str = NULL }, 0, 0, D },
-#if FF_API_HTTP_USER_AGENT
-    { "user-agent", "use the \"user_agent\" option instead", OFFSET(user_agent), AV_OPT_TYPE_STRING, { .str = DEFAULT_USER_AGENT }, 0, 0, D|AV_OPT_FLAG_DEPRECATED },
-#endif
     { "multiple_requests", "use persistent connections", OFFSET(multiple_requests), AV_OPT_TYPE_BOOL, { .i64 = 0 }, 0, 1, D | E },
     { "post_data", "set custom HTTP post data", OFFSET(post_data), AV_OPT_TYPE_BINARY, .flags = D | E },
     { "mime_type", "export the MIME type", OFFSET(mime_type), AV_OPT_TYPE_STRING, { .str = NULL }, 0, 0, AV_OPT_FLAG_EXPORT | AV_OPT_FLAG_READONLY },
@@ -170,6 +168,7 @@ static const AVOption options[] = {
     { "listen", "listen on HTTP", OFFSET(listen), AV_OPT_TYPE_INT, { .i64 = 0 }, 0, 2, D | E },
     { "resource", "The resource requested by a client", OFFSET(resource), AV_OPT_TYPE_STRING, { .str = NULL }, 0, 0, E },
     { "reply_code", "The http status code to return to a client", OFFSET(reply_code), AV_OPT_TYPE_INT, { .i64 = 200}, INT_MIN, 599, E},
+    { "short_seek_size", "Threshold to favor readahead over seek.", OFFSET(short_seek_size), AV_OPT_TYPE_INT, { .i64 = 0 }, 0, INT_MAX, D },
     { NULL }
 };
 
@@ -608,6 +607,7 @@ static int http_listen(URLContext *h, const char *uri, int flags,
     }
 fail:
     av_dict_free(&s->chained_options);
+    av_dict_free(&s->cookie_dict);
     return ret;
 }
 
@@ -648,8 +648,10 @@ static int http_open(URLContext *h, const char *uri, int flags,
     }
     ret = http_open_cnx(h, options);
 bail_out:
-    if (ret < 0)
+    if (ret < 0) {
         av_dict_free(&s->chained_options);
+        av_dict_free(&s->cookie_dict);
+    }
     return ret;
 }
 
@@ -1766,6 +1768,7 @@ static int http_close(URLContext *h)
     if (s->hd)
         ffurl_closep(&s->hd);
     av_dict_free(&s->chained_options);
+    av_dict_free(&s->cookie_dict);
     return ret;
 }
 
@@ -1841,6 +1844,8 @@ static int http_get_file_handle(URLContext *h)
 static int http_get_short_seek(URLContext *h)
 {
     HTTPContext *s = h->priv_data;
+    if (s->short_seek_size >= 1)
+        return s->short_seek_size;
     return ffurl_get_short_seek(s->hd);
 }
 

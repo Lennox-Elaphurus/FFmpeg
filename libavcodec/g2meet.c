@@ -1164,7 +1164,7 @@ static int g2m_init_buffers(G2MContext *c)
         c->framebuf_stride = FFALIGN(c->width + 15, 16) * 3;
         aligned_height     = c->height + 15;
         av_free(c->framebuf);
-        c->framebuf = av_mallocz_array(c->framebuf_stride, aligned_height);
+        c->framebuf = av_calloc(c->framebuf_stride, aligned_height);
         if (!c->framebuf)
             return AVERROR(ENOMEM);
     }
@@ -1623,7 +1623,7 @@ static av_cold int g2m_decode_end(AVCodecContext *avctx)
     return 0;
 }
 
-AVCodec ff_g2m_decoder = {
+const AVCodec ff_g2m_decoder = {
     .name           = "g2m",
     .long_name      = NULL_IF_CONFIG_SMALL("Go2Meeting"),
     .type           = AVMEDIA_TYPE_VIDEO,

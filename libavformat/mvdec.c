@@ -387,7 +387,7 @@ static int mv_read_header(AVFormatContext *avctx)
             if (!ast)
                 return AVERROR(ENOMEM);
             ast->codecpar->codec_type = AVMEDIA_TYPE_AUDIO;
-            if ((read_table(avctx, ast, parse_audio_var)) < 0)
+            if ((ret = read_table(avctx, ast, parse_audio_var)) < 0)
                 return ret;
             if (mv->acompression == 100 &&
                 mv->aformat == AUDIO_FORMAT_SIGNED &&
@@ -436,13 +436,14 @@ static int mv_read_packet(AVFormatContext *avctx, AVPacket *pkt)
     MvContext *mv = avctx->priv_data;
     AVIOContext *pb = avctx->pb;
     AVStream *st = avctx->streams[mv->stream_index];
+    FFStream *const sti = ffstream(st);
     const AVIndexEntry *index;
     int frame = mv->frame[mv->stream_index];
     int64_t ret;
     uint64_t pos;
 
-    if (frame < st->nb_index_entries) {
-        index = &st->index_entries[frame];
+    if (frame < sti->nb_index_entries) {
+        index = &sti->index_entries[frame];
         pos   = avio_tell(pb);
         if (index->pos > pos)
             avio_skip(pb, index->pos - pos);
@@ -501,7 +502,7 @@ static int mv_read_seek(AVFormatContext *avctx, int stream_index,
     return 0;
 }
 
-AVInputFormat ff_mv_demuxer = {
+const AVInputFormat ff_mv_demuxer = {
     .name           = "mv",
     .long_name      = NULL_IF_CONFIG_SMALL("Silicon Graphics Movie"),
     .priv_data_size = sizeof(MvContext),

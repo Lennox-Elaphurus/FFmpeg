@@ -61,8 +61,8 @@
 #include "mxf.h"
 #include "config.h"
 
-extern AVOutputFormat ff_mxf_d10_muxer;
-extern AVOutputFormat ff_mxf_opatom_muxer;
+extern const AVOutputFormat ff_mxf_d10_muxer;
+extern const AVOutputFormat ff_mxf_opatom_muxer;
 
 #define EDIT_UNITS_PER_BODY 250
 #define KAG_SIZE 512
@@ -507,6 +507,7 @@ static const MXFLocalTagPair* mxf_lookup_local_tag(int tag)
 
     // this assert can only be hit during development
     av_assert0(0 && "you forgot to add your new tag to mxf_local_tag_batch");
+    return NULL;
 }
 
 static void mxf_mark_tag_unused(MXFContext *mxf, int tag)
@@ -964,7 +965,6 @@ static void mxf_write_structural_component(AVFormatContext *s, AVStream *st, MXF
 {
     MXFContext *mxf = s->priv_data;
     AVIOContext *pb = s->pb;
-    int i;
 
     mxf_write_metadata_key(pb, 0x011100);
     PRINT_KEY(s, "sturctural component key", pb->buf_ptr - 16);
@@ -984,8 +984,7 @@ static void mxf_write_structural_component(AVFormatContext *s, AVStream *st, MXF
     // write source package uid, end of the reference
     mxf_write_local_tag(s, 32, 0x1101);
     if (!package->ref) {
-        for (i = 0; i < 4; i++)
-            avio_wb64(pb, 0);
+        ffio_fill(pb, 0, 32);
     } else
         mxf_write_umid(s, package->ref->instance);
 
@@ -2501,15 +2500,12 @@ static int mxf_init_timecode(AVFormatContext *s, AVStream *st, AVRational tbc)
         return av_timecode_init(&mxf->tc, av_inv_q(tbc), 0, 0, s);
 }
 
-static int mxf_write_header(AVFormatContext *s)
+static int mxf_init(AVFormatContext *s)
 {
     MXFContext *mxf = s->priv_data;
     int i, ret;
     uint8_t present[FF_ARRAY_ELEMS(mxf_essence_container_uls)] = {0};
     int64_t timestamp = 0;
-
-    if (!s->nb_streams)
-        return -1;
 
     if (s->oformat == &ff_mxf_opatom_muxer && s->nb_streams !=1) {
         av_log(s, AV_LOG_ERROR, "there must be exactly one stream for mxf opatom\n");
@@ -3097,15 +3093,16 @@ static void mxf_deinit(AVFormatContext *s)
     }
 }
 
-static int mxf_interleave_get_packet(AVFormatContext *s, AVPacket *out, AVPacket *pkt, int flush)
+static int mxf_interleave_get_packet(AVFormatContext *s, AVPacket *out, int flush)
 {
+    FFFormatContext *const si = ffformatcontext(s);
     int i, stream_count = 0;
 
     for (i = 0; i < s->nb_streams; i++)
-        stream_count += !!s->streams[i]->internal->last_in_packet_buffer;
+        stream_count += !!ffstream(s->streams[i])->last_in_packet_buffer;
 
     if (stream_count && (s->nb_streams == stream_count || flush)) {
-        PacketList *pktl = s->internal->packet_buffer;
+        PacketList *pktl = si->packet_buffer;
         if (s->nb_streams != stream_count) {
             PacketList *last = NULL;
             // find last packet in edit unit
@@ -3113,8 +3110,8 @@ static int mxf_interleave_get_packet(AVFormatContext *s, AVPacket *out, AVPacket
                 if (!stream_count || pktl->pkt.stream_index == 0)
                     break;
                 // update last packet in packet buffer
-                if (s->streams[pktl->pkt.stream_index]->internal->last_in_packet_buffer != pktl)
-                    s->streams[pktl->pkt.stream_index]->internal->last_in_packet_buffer = pktl;
+                if (ffstream(s->streams[pktl->pkt.stream_index])->last_in_packet_buffer != pktl)
+                    ffstream(s->streams[pktl->pkt.stream_index])->last_in_packet_buffer = pktl;
                 last = pktl;
                 pktl = pktl->next;
                 stream_count--;
@@ -3129,20 +3126,20 @@ static int mxf_interleave_get_packet(AVFormatContext *s, AVPacket *out, AVPacket
             if (last)
                 last->next = NULL;
             else {
-                s->internal->packet_buffer = NULL;
-                s->internal->packet_buffer_end= NULL;
+                si->packet_buffer     = NULL;
+                si->packet_buffer_end = NULL;
                 goto out;
             }
-            pktl = s->internal->packet_buffer;
+            pktl = si->packet_buffer;
         }
 
         *out = pktl->pkt;
         av_log(s, AV_LOG_TRACE, "out st:%d dts:%"PRId64"\n", (*out).stream_index, (*out).dts);
-        s->internal->packet_buffer = pktl->next;
-        if(s->streams[pktl->pkt.stream_index]->internal->last_in_packet_buffer == pktl)
-            s->streams[pktl->pkt.stream_index]->internal->last_in_packet_buffer= NULL;
-        if(!s->internal->packet_buffer)
-            s->internal->packet_buffer_end= NULL;
+        si->packet_buffer = pktl->next;
+        if (ffstream(s->streams[pktl->pkt.stream_index])->last_in_packet_buffer == pktl)
+            ffstream(s->streams[pktl->pkt.stream_index])->last_in_packet_buffer = NULL;
+        if (!si->packet_buffer)
+            si->packet_buffer_end = NULL;
         av_freep(&pktl);
         return 1;
     } else {
@@ -3161,16 +3158,17 @@ static int mxf_compare_timestamps(AVFormatContext *s, const AVPacket *next,
         (next->dts == pkt->dts && sc->order < sc2->order);
 }
 
-static int mxf_interleave(AVFormatContext *s, AVPacket *out, AVPacket *pkt, int flush)
+static int mxf_interleave(AVFormatContext *s, AVPacket *pkt,
+                          int flush, int has_packet)
 {
     int ret;
-    if (pkt) {
+    if (has_packet) {
         MXFStreamContext *sc = s->streams[pkt->stream_index]->priv_data;
         pkt->pts = pkt->dts = sc->pkt_cnt++;
         if ((ret = ff_interleave_add_packet(s, pkt, mxf_compare_timestamps)) < 0)
             return ret;
     }
-    return mxf_interleave_get_packet(s, out, NULL, flush);
+    return mxf_interleave_get_packet(s, pkt, flush);
 }
 
 #define MXF_COMMON_OPTIONS \
@@ -3239,7 +3237,7 @@ static const AVClass mxf_opatom_muxer_class = {
     .version        = LIBAVUTIL_VERSION_INT,
 };
 
-AVOutputFormat ff_mxf_muxer = {
+const AVOutputFormat ff_mxf_muxer = {
     .name              = "mxf",
     .long_name         = NULL_IF_CONFIG_SMALL("MXF (Material eXchange Format)"),
     .mime_type         = "application/mxf",
@@ -3247,7 +3245,7 @@ AVOutputFormat ff_mxf_muxer = {
     .priv_data_size    = sizeof(MXFContext),
     .audio_codec       = AV_CODEC_ID_PCM_S16LE,
     .video_codec       = AV_CODEC_ID_MPEG2VIDEO,
-    .write_header      = mxf_write_header,
+    .init              = mxf_init,
     .write_packet      = mxf_write_packet,
     .write_trailer     = mxf_write_footer,
     .deinit            = mxf_deinit,
@@ -3256,14 +3254,14 @@ AVOutputFormat ff_mxf_muxer = {
     .priv_class        = &mxf_muxer_class,
 };
 
-AVOutputFormat ff_mxf_d10_muxer = {
+const AVOutputFormat ff_mxf_d10_muxer = {
     .name              = "mxf_d10",
     .long_name         = NULL_IF_CONFIG_SMALL("MXF (Material eXchange Format) D-10 Mapping"),
     .mime_type         = "application/mxf",
     .priv_data_size    = sizeof(MXFContext),
     .audio_codec       = AV_CODEC_ID_PCM_S16LE,
     .video_codec       = AV_CODEC_ID_MPEG2VIDEO,
-    .write_header      = mxf_write_header,
+    .init              = mxf_init,
     .write_packet      = mxf_write_packet,
     .write_trailer     = mxf_write_footer,
     .deinit            = mxf_deinit,
@@ -3272,7 +3270,7 @@ AVOutputFormat ff_mxf_d10_muxer = {
     .priv_class        = &mxf_d10_muxer_class,
 };
 
-AVOutputFormat ff_mxf_opatom_muxer = {
+const AVOutputFormat ff_mxf_opatom_muxer = {
     .name              = "mxf_opatom",
     .long_name         = NULL_IF_CONFIG_SMALL("MXF (Material eXchange Format) Operational Pattern Atom"),
     .mime_type         = "application/mxf",
@@ -3280,7 +3278,7 @@ AVOutputFormat ff_mxf_opatom_muxer = {
     .priv_data_size    = sizeof(MXFContext),
     .audio_codec       = AV_CODEC_ID_PCM_S16LE,
     .video_codec       = AV_CODEC_ID_DNXHD,
-    .write_header      = mxf_write_header,
+    .init              = mxf_init,
     .write_packet      = mxf_write_packet,
     .write_trailer     = mxf_write_footer,
     .deinit            = mxf_deinit,
